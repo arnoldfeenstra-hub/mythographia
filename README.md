@@ -3,8 +3,8 @@
 An explorable atlas of Greek myth: gods, mortals, monsters and the events that bind them,
 as a force-directed web, a scrubbable timeline and a "six degrees" pathfinder.
 
-This is a separate project from the memecoin screener in the repository root. It shares
-nothing with it and deploys as its own Vercel project (root directory `mythgraph/`).
+The site deploys to Vercel. The **ingest-deploy-qa** GitHub Actions workflow (manual trigger)
+runs the full pipeline: Wikipedia → Neon → Vercel → Playwright QA against the live URL.
 
 ## Where the content comes from
 
@@ -35,12 +35,11 @@ Hero, …) is always shown in text.
 ## Setup
 
 ```sh
-cd mythgraph
 npm install
 npm run build              # vendors d3 + self-hosted fonts into public/vendor
 ```
 
-Put the Neon connection string in `mythgraph/.env.local` (or the repo-root `.env.local`) as
+Put the Neon connection string in `.env.local` as
 `DATABASE_URL=…`. It is gitignored and never printed.
 
 ```sh
@@ -58,10 +57,11 @@ public-domain image.
 ## Deploy
 
 ```sh
-cd mythgraph && vercel --prod
+vercel --prod
 ```
 
-Set `DATABASE_URL` in the Vercel project's environment variables. `api/graph.js` reads Neon
+Set `DATABASE_URL` in the Vercel project's environment variables. For the workflow, add the
+repository secrets `MYTHGRAPH_DATABASE_URL`, `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`. `api/graph.js` reads Neon
 over HTTP (`@neondatabase/serverless`) and is CDN-cached for an hour.
 
 ## Tests and QA

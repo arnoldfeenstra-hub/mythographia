@@ -7,7 +7,8 @@
 // all taken from en.wikipedia.org / commons.wikimedia.org responses.
 
 import { writeFileSync } from 'node:fs';
-import pg from 'pg';
+import { neon } from '@neondatabase/serverless';
+import { writeGraph } from '../lib/db-write.js';
 import { queryTitles } from './wiki.js';
 import {
   parseInfobox, familyFromInfobox, leadSection, stripRefs, extractLinks, imageCandidates,
@@ -243,59 +244,11 @@ if (outPath) {
   log(`Wrote ${outPath}`);
 }
 
-// 10. Write to Postgres in one transaction ----------------------------------
+// 10. Write to Postgres in one transaction (Neon HTTPS driver) ---------------
 if (writeDb) {
   log('Writing to Postgres…');
-  const client = new pg.Client({ connectionString: databaseUrl(), ssl: { rejectUnauthorized: true } });
-  await client.connect();
-  try {
-    await client.query('begin');
-    const run = await client.query('insert into ingest_runs (seed_count) values ($1) returning id', [SEEDS.length]);
-    const runId = run.rows[0].id;
-    await client.query('delete from node_i18n');
-    await client.query('delete from edges');
-    await client.query('delete from images');
-    await client.query('delete from nodes');
-    for (const n of graph.nodes) {
-      await client.query(
-        `insert into nodes (id, title, type, type_source, description, extract, fun_fact, fun_fact_section,
-                            generation, wiki_url, revision_id, run_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [n.id, n.title, n.type, n.type_source, n.description, n.extract, n.fun_fact, n.fun_fact_section,
-          n.generation, n.wiki_url, n.revision_id, runId],
-      );
-      const i = n.image;
-      if (i) {
-        await client.query(
-          `insert into images (node_id, file_title, thumb_url, thumb_width, thumb_height, original_url, commons_url,
-                               artist, date_text, license, credit, object_name)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-          [n.id, i.file_title, i.thumb_url, i.thumb_width, i.thumb_height, i.original_url, i.commons_url,
-            i.artist, i.date_text, i.license, i.credit, i.object_name],
-        );
-      }
-    }
-    for (const r of i18nRows(graph.nodes)) {
-      await client.query(
-        `insert into node_i18n (node_id, lang, title, description, extract, fun_fact, fun_fact_section, wiki_url, revision_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [r.node_id, r.lang, r.title, r.description, r.extract, r.fun_fact, r.fun_fact_section, r.wiki_url, r.revision_id],
-      );
-    }
-    for (const e of graph.edges) {
-      await client.query('insert into edges (source, target, rel, provenance) values ($1,$2,$3,$4)', [e.s, e.t, e.rel, e.provenance]);
-    }
-    await client.query(
-      `update ingest_runs set finished_at = now(), node_count = $2, edge_count = $3, image_count = $4, report = $5 where id = $1`,
-      [runId, graph.nodes.length, graph.edges.length, graph.nodes.filter((n) => n.image).length, report],
-    );
-    await client.query('commit');
-  } catch (err) {
-    await client.query('rollback');
-    throw err;
-  } finally {
-    await client.end();
-  }
+  await writeGraph(neon(databaseUrl()), graph, i18nRows(graph.nodes), report, SEEDS.length);
+  log('  committed');
 }
 
 writeFileSync(new URL('./last-report.json', import.meta.url), JSON.stringify(report, null, 2));

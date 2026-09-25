@@ -7,3 +7,4 @@ ingest/last-report.json
 .vercel
 qa/real-graph.json
 ingest/.cache/
+.env*

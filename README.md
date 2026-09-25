@@ -1,5 +1,7 @@
 # Mythographia
 
+**Live:** https://mythographia-sigma.vercel.app
+
 An explorable atlas of Greek myth: gods, mortals, monsters and the events that bind them,
 as a force-directed web, a scrubbable timeline and a "six degrees" pathfinder.
 
@@ -69,7 +71,10 @@ public-domain image.
 vercel --prod
 ```
 
-Set `DATABASE_URL` in the Vercel project's environment variables. For the workflow, add the
+The database is Neon, attached through Vercel's Neon integration (`vercel integration add neon`), which
+sets `DATABASE_URL` on the project. All database access, including the ingest's write and
+`db:schema`, goes over Neon's HTTPS driver (`@neondatabase/serverless`), so it works where port
+5432 is closed. The ingest replaces the previous snapshot in a single transaction. For the workflow, add the
 repository secrets `MYTHGRAPH_DATABASE_URL`, `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`. `api/graph.js` reads Neon
 over HTTP (`@neondatabase/serverless`) and is CDN-cached for an hour.
 

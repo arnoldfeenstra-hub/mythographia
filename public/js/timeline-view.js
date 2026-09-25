@@ -1,5 +1,6 @@
 /* global d3 */
 import { FAMILIES, familyOf } from './model.js';
+import { t } from './i18n.js';
 
 const M = { top: 34, right: 150, bottom: 40, left: 112 };
 
@@ -8,7 +9,7 @@ export function createTimelineView({ svgEl, scrubEl, labelEl, playEl, index, onH
   const placed = index.nodes.filter((n) => n.generation != null);
   const unplaced = index.nodes.filter((n) => n.generation == null);
   const maxGen = d3.max(placed, (n) => n.generation) ?? 1;
-  const lanes = Object.keys(FAMILIES);
+  const lanes = Object.keys(FAMILIES).filter((f) => index.nodes.some((n) => familyOf(n) === f));
   const r = (n) => Math.min(9, 2.6 + Math.sqrt(index.degree.get(n.id) || 0) * 0.95);
 
   let width = 0;
@@ -107,20 +108,20 @@ export function createTimelineView({ svgEl, scrubEl, labelEl, playEl, index, onH
     gGrid.selectAll('line').data(ticks).join('line')
       .attr('x1', (t) => x(t)).attr('x2', (t) => x(t)).attr('y1', M.top - 8).attr('y2', height - M.bottom);
     gAxis.attr('transform', `translate(0,${height - M.bottom})`)
-      .call(d3.axisBottom(x).tickValues(ticks).tickFormat((t) => (t === 0 ? 'Gen 0' : `${t}`)).tickSizeOuter(0))
+      .call(d3.axisBottom(x).tickValues(ticks).tickFormat((v) => (v === 0 ? t('tl.gen0') : `${v}`)).tickSizeOuter(0))
       .call((g) => g.select('.domain').attr('d', `M${M.left},0H${width - M.right}`));
     gAxis.selectAll('.axis-title').data([0]).join('text').attr('class', 'axis-title')
       .attr('x', width - M.right).attr('y', 30).attr('text-anchor', 'end')
-      .text('generations after the first beings →');
+      .text(t('tl.axis'));
 
     if (full) {
       gLanes.selectAll('text').data(lanes).join('text').attr('class', 'tl-lane-label')
-        .attr('x', 20).attr('y', (l) => y(l) + y.bandwidth() / 2).attr('dy', '0.35em').text((l) => FAMILIES[l].label);
+        .attr('x', 20).attr('y', (l) => y(l) + y.bandwidth() / 2).attr('dy', '0.35em').text((l) => t(`family.${l}`));
       gLanes.selectAll('line').data(lanes.slice(1)).join('line')
         .attr('x1', 16).attr('x2', width - 16).attr('y1', (l) => y(l) - (y.step() - y.bandwidth()) / 2).attr('y2', (l) => y(l) - (y.step() - y.bandwidth()) / 2)
         .attr('stroke', 'var(--rule-soft)');
       unplacedLabel.attr('x', width - M.right + 22).attr('y', M.top - 14)
-        .text(unplaced.length ? `Unplaced · ${unplaced.length}` : '');
+        .text(unplaced.length ? t('tl.unplaced', { n: unplaced.length }) : '');
     }
 
     const nb = selected ? new Set((index.adj.get(selected) || []).map((a) => a.id)) : null;
@@ -183,7 +184,7 @@ export function createTimelineView({ svgEl, scrubEl, labelEl, playEl, index, onH
     const boxes = [];
     const shown = [];
     for (const d of cands) {
-      const w = d.title.length * 6.6;
+      const w = (d.name ?? d.title).length * 6.6;
       const cx = px(d);
       const cy = pos.get(d.id).y - r(d) - 7;
       const b = [cx - w / 2, cy - 11, cx + w / 2, cy + 3];
@@ -195,15 +196,15 @@ export function createTimelineView({ svgEl, scrubEl, labelEl, playEl, index, onH
     gLabels.selectAll('text').data(shown, (s) => s.d.id).join('text').attr('class', 'tl-label')
       .attr('text-anchor', 'middle').attr('x', (s) => s.cx).attr('y', (s) => s.cy)
       .style('font-weight', (s) => (s.d.id === selected ? 600 : null))
-      .text((s) => s.d.title);
+      .text((s) => s.d.name ?? s.d.title);
   }
 
   function drawNow() {
     const nx = x(now);
     const visible = nx >= M.left - 1 && nx <= width - M.right + 1;
     nowLine.attr('x1', nx).attr('x2', nx).attr('y1', M.top - 10).attr('y2', height - M.bottom).attr('opacity', visible ? 1 : 0);
-    nowLabel.attr('x', nx).attr('y', M.top - 16).attr('opacity', visible ? 1 : 0).text(`generation ${now.toFixed(1)}`);
-    labelEl.textContent = `Generation ${now.toFixed(1)} of ${maxGen.toFixed(1)}`;
+    nowLabel.attr('x', nx).attr('y', M.top - 16).attr('opacity', visible ? 1 : 0).text(t('tl.now', { g: now.toFixed(1) }));
+    labelEl.textContent = t('tl.label', { g: now.toFixed(1), max: maxGen.toFixed(1) });
   }
 
   function setNow(v) {
@@ -220,13 +221,13 @@ export function createTimelineView({ svgEl, scrubEl, labelEl, playEl, index, onH
   svg.on('click', () => onSelect(null));
 
   function stop() {
-    if (playing) { playing.stop(); playing = null; playEl.setAttribute('aria-label', 'Play timeline'); }
+    if (playing) { playing.stop(); playing = null; playEl.setAttribute('aria-label', t('tl.play')); }
   }
   playEl.addEventListener('click', () => {
     if (playing) return stop();
     const start = now >= maxGen - 0.01 ? 0 : now;
     const dur = 14000 * ((maxGen - start) / maxGen);
-    playEl.setAttribute('aria-label', 'Pause timeline');
+    playEl.setAttribute('aria-label', t('tl.pause'));
     playing = d3.timer((t) => {
       setNow(start + (maxGen - start) * Math.min(1, t / dur));
       if (t >= dur) stop();
@@ -250,6 +251,7 @@ export function createTimelineView({ svgEl, scrubEl, labelEl, playEl, index, onH
       }
     },
     setNow,
+    refreshText() { render(true); },
     stats: () => ({ placed: placed.length, unplaced: unplaced.length, maxGen, now }),
   };
 }

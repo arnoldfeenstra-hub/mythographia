@@ -52,3 +52,18 @@ create table if not exists edges (
 );
 
 create index if not exists edges_target_idx on edges (target);
+
+-- The same article in another Wikipedia language (reached through the English
+-- article's interlanguage link). Text is that wiki's own, never a translation.
+create table if not exists node_i18n (
+  node_id          text not null references nodes(id) on delete cascade,
+  lang             text not null,             -- e.g. 'nl'
+  title            text not null,             -- article title on that wiki
+  description      text,
+  extract          text,                      -- lead section, plain text
+  fun_fact         text,
+  fun_fact_section text,
+  wiki_url         text not null,
+  revision_id      bigint,
+  primary key (node_id, lang)
+);

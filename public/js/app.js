@@ -1,4 +1,5 @@
-import { buildIndex, shortestPath, relationLabel, NODE_TYPES, FAMILIES, familyOf } from './model.js';
+import { buildIndex, shortestPath, NODE_TYPES, FAMILIES, familyOf } from './model.js';
+import { t, getLang, setLang, content, assignNames, applyStatic } from './i18n.js';
 import { createGraphView } from './graph-view.js';
 import { createTimelineView } from './timeline-view.js';
 
@@ -12,30 +13,49 @@ const store = {
 };
 const savedTheme = store.get('mythographia-theme');
 if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+setLang(getLang());
+applyStatic();
 
 // ---- load -----------------------------------------------------------------------
 let data;
 try {
   const res = await fetch('/api/graph');
-  if (!res.ok) throw new Error(`The archive answered ${res.status}.`);
+  if (!res.ok) throw new Error(t('status.answered', { status: res.status }));
   data = await res.json();
 } catch (err) {
-  statusEl.textContent = `The archive could not be reached. ${err.message}`;
+  statusEl.textContent = `${t('status.unreachable')} ${err.message}`;
   throw err;
 }
 if (!data.nodes?.length) {
-  statusEl.textContent = 'The archive is empty — run the Wikipedia ingest first.';
+  statusEl.textContent = t('status.empty');
   throw new Error('empty graph');
 }
 const index = buildIndex(data);
+assignNames(index.nodes);
 const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const fold = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-const subtype = (n) => NODE_TYPES[n.type]?.label ?? n.type;
+const subtype = (n) => t(`type.${n.type}`);
+const relLabel = (step) => t(`rel.${step.rel}.${step.dir === 1 ? 'f' : 'b'}`);
 const swatch = (n) => `<span class="swatch ${n.type === 'event' ? 'event' : ''}" style="--c: var(--${familyOf(n)})"></span>`;
-const genLabel = (n) => (n.generation == null ? '' : ` · gen ${n.generation.toFixed(1)}`);
+const genLabel = (n) => (n.generation == null ? '' : ` · ${t('gen')} ${n.generation.toFixed(1)}`);
 
-$('#data-stamp').textContent = `${index.nodes.length} entries · ${index.edges.length} ties${
-  data.meta?.ingestedAt ? ` · fetched ${new Date(data.meta.ingestedAt).toISOString().slice(0, 10)}` : ''}`;
+function renderStamp() {
+  $('#data-stamp').textContent = t('stamp', { nodes: index.nodes.length, edges: index.edges.length })
+    + (data.meta?.ingestedAt ? ` · ${t('fetched', { date: new Date(data.meta.ingestedAt).toISOString().slice(0, 10) })}` : '');
+}
+function renderFooter() {
+  const a = (href, text) => `<a href="${href}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
+  const links = {
+    wp: a('https://en.wikipedia.org/', t('wp.name')),
+    nlwp: a('https://nl.wikipedia.org/', t('nlwp.name')),
+    cc: a('https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-SA 4.0'),
+    commons: a('https://commons.wikimedia.org/', 'Wikimedia Commons'),
+  };
+  $('#foot-long').innerHTML = `<strong>${escapeHtml(t('foot.sources'))}</strong> ${t('foot.long', links)}`;
+  $('#foot-short').innerHTML = t('foot.short', { ...links, wp: a('https://wikipedia.org/', t('wp.short')) });
+}
+renderStamp();
+renderFooter();
 
 // ---- state ----------------------------------------------------------------------
 let view = 'graph';
@@ -51,9 +71,9 @@ function showHover(id, x, y, host) {
     ${img ? `<div class="poster" style="background-image:url('${encodeURI(img)}')"></div>` : ''}
     <div class="inner">
       <div class="kicker">${swatch(n)} ${escapeHtml(subtype(n))}${escapeHtml(genLabel(n))}</div>
-      <h3>${escapeHtml(n.title)}</h3>
-      ${n.description ? `<p>${escapeHtml(n.description)}</p>` : ''}
-      <p class="meta">${index.degree.get(id)} ties${n.image?.artist ? ` · image: ${escapeHtml(n.image.artist)}` : ''}</p>
+      <h3>${escapeHtml(n.name)}</h3>
+      ${content(n).description ? `<p>${escapeHtml(content(n).description)}</p>` : ''}
+      <p class="meta">${escapeHtml(t('ties', { n: index.degree.get(id) }))}${n.image?.artist ? ` · ${escapeHtml(t('image'))}: ${escapeHtml(n.image.artist)}` : ''}</p>
     </div>`;
   hover.hidden = false;
   const stage = $('#stage').getBoundingClientRect();
@@ -117,54 +137,60 @@ for (const b of document.querySelectorAll('.views button')) b.addEventListener('
 // ---- detail panel ----------------------------------------------------------------
 const detail = $('#detail');
 const REL_GROUPS = [
-  ['Parents', (s) => s.rel === 'parent' && s.dir === -1],
-  ['Children', (s) => s.rel === 'parent' && s.dir === 1],
-  ['Consorts', (s) => s.rel === 'consort'],
-  ['Siblings', (s) => s.rel === 'sibling'],
-  ['Appears in', (s) => s.rel === 'participant' && s.dir === 1],
-  ['Featuring', (s) => s.rel === 'participant' && s.dir === -1],
-  ['Linked with', (s) => s.rel === 'associated'],
+  ['group.parents', (s) => s.rel === 'parent' && s.dir === -1],
+  ['group.children', (s) => s.rel === 'parent' && s.dir === 1],
+  ['group.consorts', (s) => s.rel === 'consort'],
+  ['group.siblings', (s) => s.rel === 'sibling'],
+  ['group.appears', (s) => s.rel === 'participant' && s.dir === 1],
+  ['group.featuring', (s) => s.rel === 'participant' && s.dir === -1],
+  ['group.linked', (s) => s.rel === 'associated'],
 ];
 
 function renderDetail(id) {
   if (!id) { detail.hidden = true; graph.setInsetRight(0); graph.setInsetBottom(0); return; }
   const n = index.byId.get(id);
-  const paras = (n.extract || '').split(/\n+/).filter(Boolean);
+  const c = content(n);
+  // TextExtracts drops pronunciation spans and leaves "(, " / "()" behind: tidy
+  // that punctuation only, never the words.
+  const tidy = (x) => x.replace(/\(\s*[,;]\s*/g, '(').replace(/\s*\(\s*\)/g, '').replace(/\s+([,.;])/g, '$1');
+  const paras = (c.extract || '').split(/\n+/).filter(Boolean).map(tidy);
   const img = n.image;
-  const steps = [...index.adj.get(id)].sort((a, b) => index.byId.get(a.id).title.localeCompare(index.byId.get(b.id).title));
+  const steps = [...index.adj.get(id)].sort((a, b) => index.byId.get(a.id).name.localeCompare(index.byId.get(b.id).name, getLang()));
   const groups = REL_GROUPS.map(([label, test]) => {
     const seen = new Set();
     const items = steps.filter(test).filter((s) => !seen.has(s.id) && seen.add(s.id));
     if (!items.length) return '';
-    return `<h4>${label}</h4><ul>${items.map((s) => {
+    return `<h4>${escapeHtml(t(label))}</h4><ul>${items.map((s) => {
       const m = index.byId.get(s.id);
-      return `<li><button data-go="${escapeHtml(m.id)}">${swatch(m)}${escapeHtml(m.title)}</button></li>`;
+      return `<li><button data-go="${escapeHtml(m.id)}">${swatch(m)}${escapeHtml(m.name)}</button></li>`;
     }).join('')}</ul>`;
   }).join('');
-  const revUrl = n.revision ? `https://en.wikipedia.org/w/index.php?oldid=${n.revision}` : n.url;
+  const revUrl = c.revision ? `https://${c.lang}.wikipedia.org/w/index.php?oldid=${c.revision}` : c.url;
+  const srcLink = `<a href="${escapeHtml(c.url)}" target="_blank" rel="noopener" lang="${c.lang}">${escapeHtml(c.title)}</a>`;
+  const rev = c.revision ? ` (<a href="${escapeHtml(revUrl)}" target="_blank" rel="noopener">${escapeHtml(t('revision', { n: c.revision }))}</a>)` : '';
   detail.innerHTML = `
-    <button class="icon-btn close" aria-label="Close">×</button>
+    <button class="icon-btn close" aria-label="${escapeHtml(t('close'))}">×</button>
     ${img ? `<figure>
-      <img src="${escapeHtml(img.thumb)}" alt="${escapeHtml(img.title || n.title)}" referrerpolicy="no-referrer" />
+      <img src="${escapeHtml(img.thumb)}" alt="${escapeHtml(img.title || n.name)}" referrerpolicy="no-referrer" onerror="this.closest('figure').hidden = true" />
       <figcaption>${[img.title, img.artist, img.date].filter(Boolean).map(escapeHtml).join(' · ')}
-        · <a href="${escapeHtml(img.page)}" target="_blank" rel="noopener">${escapeHtml(img.license || 'Public domain')}, Wikimedia Commons</a></figcaption>
+        · <a href="${escapeHtml(img.page)}" target="_blank" rel="noopener">${escapeHtml(img.license || t('img.license'))}, Wikimedia Commons</a></figcaption>
     </figure>` : ''}
     <div class="body">
       <div class="kicker">${swatch(n)} ${escapeHtml(subtype(n))}${escapeHtml(genLabel(n))}</div>
-      <h2>${escapeHtml(n.title)}</h2>
-      ${n.description ? `<p class="desc">${escapeHtml(n.description)}</p>` : ''}
-      <div class="extract">${paras.slice(0, 1).map((p) => `<p>${escapeHtml(p)}</p>`).join('')}
+      <h2>${escapeHtml(n.name)}</h2>
+      ${c.fallback ? `<p class="fallback">${escapeHtml(t('fallback'))}</p>` : ''}
+      ${c.description ? `<p class="desc" lang="${c.lang}">${escapeHtml(c.description)}</p>` : ''}
+      <div class="extract" lang="${c.lang}">${paras.slice(0, 1).map((p) => `<p>${escapeHtml(p)}</p>`).join('')}
         <div class="rest" hidden>${paras.slice(1).map((p) => `<p>${escapeHtml(p)}</p>`).join('')}</div>
-        ${paras.length > 1 ? '<button class="more">Continue reading</button>' : ''}</div>
-      ${n.funFact ? `<div class="fact"><h4>From “${escapeHtml(n.funFact.section)}”</h4><p>${escapeHtml(n.funFact.text)}</p></div>` : ''}
+        ${paras.length > 1 ? `<button class="more">${escapeHtml(t('more'))}</button>` : ''}</div>
+      ${c.funFact ? `<div class="fact" lang="${c.lang}"><h4>${escapeHtml(t('factFrom', { section: c.funFact.section }))}</h4><p>${escapeHtml(c.funFact.text)}</p></div>` : ''}
       <div class="rels">${groups}</div>
       <div class="actions">
-        ${view !== 'timeline' ? '<button class="chip" data-act="expand">Expand in web</button>' : '<button class="chip" data-act="web">Show in web</button>'}
-        ${view !== 'timeline' ? '<button class="chip" data-act="timeline">See on timeline</button>' : ''}
-        <button class="chip" data-act="from">Trace a thread from here</button>
+        ${view !== 'timeline' ? `<button class="chip" data-act="expand">${escapeHtml(t('act.expand'))}</button>` : `<button class="chip" data-act="web">${escapeHtml(t('act.web'))}</button>`}
+        ${view !== 'timeline' ? `<button class="chip" data-act="timeline">${escapeHtml(t('act.timeline'))}</button>` : ''}
+        <button class="chip" data-act="from">${escapeHtml(t('act.from'))}</button>
       </div>
-      <p class="src">Text: “<a href="${escapeHtml(n.url)}" target="_blank" rel="noopener">${escapeHtml(n.title)}</a>”, English Wikipedia${n.revision ? ` (<a href="${escapeHtml(revUrl)}" target="_blank" rel="noopener">revision ${n.revision}</a>)` : ''},
-        CC BY-SA 4.0, excerpted without changes.</p>
+      <p class="src">${t('source', { link: srcLink, wiki: escapeHtml(t(`wiki.${c.lang}`)), rev })}</p>
     </div>`;
   detail.hidden = false;
   detail.scrollTop = 0;
@@ -189,7 +215,7 @@ detail.addEventListener('click', (ev) => {
   if (act === 'web') { setView('graph'); goTo(selected); }
   if (act === 'from') {
     pathEnds.from = selected;
-    $('#path-from').value = index.byId.get(selected).title;
+    $('#path-from').value = index.byId.get(selected).name;
     setView('path');
     $('#path-to').focus();
   }
@@ -218,11 +244,11 @@ const hidden = new Set();
 function renderLegend() {
   const counts = new Map();
   for (const n of index.nodes) counts.set(familyOf(n), (counts.get(familyOf(n)) || 0) + 1);
-  $('#legend').innerHTML = `<h3>Filter</h3><div class="fam">${Object.entries(FAMILIES).map(([key, f]) => `
-    <button data-fam="${key}" aria-pressed="${!hidden.has(key)}" title="${Object.values(NODE_TYPES).filter((t) => t.family === key).map((t) => t.label).join(', ')}">
-      <span class="swatch ${key === 'event' ? 'event' : ''}" style="--c: var(--${key})"></span>${f.label} <span style="color:var(--muted)">${counts.get(key) || 0}</span>
+  $('#legend').innerHTML = `<h3>${escapeHtml(t('legend.title'))}</h3><div class="fam">${Object.keys(FAMILIES).filter((key) => counts.get(key)).map((key) => `
+    <button data-fam="${key}" aria-pressed="${!hidden.has(key)}" title="${escapeHtml(Object.entries(NODE_TYPES).filter(([, v]) => v.family === key).map(([k]) => t(`type.${k}`)).join(', '))}">
+      <span class="swatch ${key === 'event' ? 'event' : ''}" style="--c: var(--${key})"></span>${escapeHtml(t(`family.${key}`))} <span style="color:var(--muted)">${counts.get(key) || 0}</span>
     </button>`).join('')}</div>
-    <div class="edge-key"><span><i></i>parentage</span><span><i class="dash"></i>appears in</span><span><i class="faint"></i>linked</span></div>`;
+    <div class="edge-key"><span><i></i>${escapeHtml(t('edge.parentage'))}</span><span><i class="dash"></i>${escapeHtml(t('edge.appears'))}</span><span><i class="faint"></i>${escapeHtml(t('edge.linked'))}</span></div>`;
 }
 renderLegend();
 $('#legend').addEventListener('click', (ev) => {
@@ -238,26 +264,32 @@ $('#legend').addEventListener('click', (ev) => {
 $('#show-all').addEventListener('click', (ev) => {
   const all = !graph.isShowingAll();
   all ? graph.showAll() : graph.showCore();
-  ev.target.textContent = all ? 'Fewer' : 'Show all';
+  ev.target.textContent = all ? t('fewer') : t('showAll');
   ev.target.setAttribute('aria-pressed', String(all));
   setTimeout(() => graph.fitAll(1100), 700);
 });
 $('#reset-view').addEventListener('click', () => { select(null); graph.fitAll(900); });
 
 // ---- search --------------------------------------------------------------------
-const titles = index.nodes.map((n) => ({ n, key: fold(n.title), desc: fold(n.description || '') }));
+const titles = index.nodes.map((n) => ({
+  n,
+  keys: [...new Set([n.title, n.i18n?.nl?.title].filter(Boolean).map(fold))],
+  desc: fold([n.description, n.i18n?.nl?.description].filter(Boolean).join(' ')),
+}));
 function search(q, { people = false } = {}) {
   const f = fold(q.trim());
   if (!f) return [];
   const out = [];
-  for (const t of titles) {
-    if (people && t.n.type === 'event') continue;
+  for (const entry of titles) {
+    if (people && entry.n.type === 'event') continue;
     let s = 0;
-    if (t.key.startsWith(f)) s = 4;
-    else if (t.key.split(/[\s(]+/).some((w) => w.startsWith(f))) s = 3;
-    else if (t.key.includes(f)) s = 2;
-    else if (f.length > 3 && t.desc.includes(f)) s = 1;
-    if (s) out.push({ n: t.n, s: s * 1000 + (index.degree.get(t.n.id) || 0) });
+    for (const key of entry.keys) {
+      if (key.startsWith(f)) s = Math.max(s, 4);
+      else if (key.split(/[\s(]+/).some((w) => w.startsWith(f))) s = Math.max(s, 3);
+      else if (key.includes(f)) s = Math.max(s, 2);
+    }
+    if (!s && f.length > 3 && entry.desc.includes(f)) s = 1;
+    if (s) out.push({ n: entry.n, s: s * 1000 + (index.degree.get(entry.n.id) || 0) });
   }
   return out.sort((a, b) => b.s - a.s).slice(0, 8).map((x) => x.n);
 }
@@ -267,7 +299,7 @@ function attachSearch(input, list, onPick, opts) {
   let active = 0;
   const render = () => {
     list.innerHTML = items.map((n, i) => `<li role="option" data-id="${escapeHtml(n.id)}" aria-selected="${i === active}">
-      ${swatch(n)}<span class="name">${highlight(n.title, input.value)}</span><span class="sub">${escapeHtml(subtype(n))}</span></li>`).join('');
+      ${swatch(n)}<span class="name">${highlight(n.name, input.value)}</span><span class="sub">${escapeHtml(subtype(n))}</span></li>`).join('');
     list.hidden = !items.length;
     list.dataset.owner = input.id;
   };
@@ -316,7 +348,7 @@ for (const key of ['from', 'to']) {
   const input = $(`#path-${key}`);
   attachSearch(input, $('#path-suggest'), (n) => {
     pathEnds[key] = n.id;
-    input.value = n.title;
+    input.value = n.name;
     if (key === 'from' && !pathEnds.to) $('#path-to').focus();
     else if (pathEnds.from && pathEnds.to) runPath();
   }, { people: true });
@@ -336,8 +368,8 @@ $('#path-random').addEventListener('click', () => {
     if (p && p.length >= 4) {
       pathEnds.from = a.id;
       pathEnds.to = b.id;
-      $('#path-from').value = a.title;
-      $('#path-to').value = b.title;
+      $('#path-from').value = a.name;
+      $('#path-to').value = b.name;
       return runPath();
     }
   }
@@ -349,12 +381,12 @@ function runPath() {
   pathTimers.forEach(clearTimeout);
   pathTimers = [];
   if (!pathEnds.from || !pathEnds.to) {
-    out.innerHTML = '<li class="on note">Choose both figures from the suggestions.</li>';
+    out.innerHTML = `<li class="on note">${escapeHtml(t('path.choose'))}</li>`;
     return;
   }
   const p = shortestPath(index, pathEnds.from, pathEnds.to, pathOpts());
   if (!p) {
-    out.innerHTML = `<li class="on note">No thread joins them${$('#family-only').checked ? ' through blood or marriage alone' : ''}.</li>`;
+    out.innerHTML = `<li class="on note">${escapeHtml(t($('#family-only').checked ? 'path.noneFamily' : 'path.none'))}</li>`;
     graph.setPath(null);
     writeHash();
     return;
@@ -365,9 +397,9 @@ function runPath() {
   const added = graph.reveal(ids, ids[0]);
   const deg = ids.length - 1;
   out.innerHTML = p.map((s, i) => `
-    ${i ? `<li class="rel" data-i="${i}">${escapeHtml(relationLabel(s.via))}</li>` : ''}
-    <li data-i="${i}"><button class="node" data-go="${escapeHtml(s.id)}">${swatch(index.byId.get(s.id))} ${escapeHtml(index.byId.get(s.id).title)}</button></li>`).join('')
-    + `<li class="note" data-i="${deg}">${deg} degree${deg === 1 ? '' : 's'} of separation.</li>`;
+    ${i ? `<li class="rel" data-i="${i}">${escapeHtml(relLabel(s.via))}</li>` : ''}
+    <li data-i="${i}"><button class="node" data-go="${escapeHtml(s.id)}">${swatch(index.byId.get(s.id))} ${escapeHtml(index.byId.get(s.id).name)}</button></li>`).join('')
+    + `<li class="note" data-i="${deg}">${escapeHtml(deg === 1 ? t('path.degree') : t('path.degrees', { n: deg }))}</li>`;
   const start = () => {
     graph.fitTo(ids, { duration: 900 });
     pathTimers.push(setTimeout(() => {
@@ -397,6 +429,31 @@ $('#theme-toggle').addEventListener('click', () => {
 });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => graph.refreshTheme());
 
+// ---- language toggle -------------------------------------------------------------
+function renderLangToggle() {
+  for (const b of document.querySelectorAll('.lang-toggle button')) b.setAttribute('aria-pressed', String(b.dataset.lang === getLang()));
+}
+renderLangToggle();
+for (const b of document.querySelectorAll('.lang-toggle button')) {
+  b.addEventListener('click', () => {
+    if (b.dataset.lang === getLang()) return;
+    setLang(b.dataset.lang);
+    assignNames(index.nodes);
+    applyStatic();
+    renderLangToggle();
+    renderLegend();
+    renderStamp();
+    renderFooter();
+    $('#show-all').textContent = graph.isShowingAll() ? t('fewer') : t('showAll');
+    for (const k of ['from', 'to']) if (pathEnds[k]) $(`#path-${k}`).value = index.byId.get(pathEnds[k]).name;
+    if (selected) renderDetail(selected);
+    graph.refreshLabels();
+    timeline?.refreshText();
+    if (view === 'path' && pathEnds.from && pathEnds.to && $('#path-result').children.length) runPath();
+    hover.hidden = true;
+  });
+}
+
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
@@ -419,8 +476,8 @@ function readHash() {
   if (v === 'path' && a && b && index.byId.has(a) && index.byId.has(b)) {
     pathEnds.from = a;
     pathEnds.to = b;
-    $('#path-from').value = index.byId.get(a).title;
-    $('#path-to').value = index.byId.get(b).title;
+    $('#path-from').value = index.byId.get(a).name;
+    $('#path-to').value = index.byId.get(b).name;
     setView('path', { push: false });
     setTimeout(runPath, 1300);
     return;
@@ -436,5 +493,5 @@ window.__myth = {
   graph,
   get timeline() { return timeline; },
   shortestPath: (a, b, o) => shortestPath(index, a, b, o),
-  state: () => ({ view, selected, pathEnds: { ...pathEnds } }),
+  state: () => ({ view, selected, lang: getLang(), pathEnds: { ...pathEnds } }),
 };

@@ -15,12 +15,18 @@ Every bio, image, date, relationship and fun fact comes from **English Wikipedia
 |---|---|
 | Bio | Lead section of the article, plain text (`prop=extracts&exintro`) |
 | Short description | Wikipedia's short description |
-| Fun fact | The first sentences of a named section (Etymology, Epithets, Iconography, …), verbatim, credited to that section |
+| Fun fact | The opening sentences of a named section (Etymology, Epithets, Iconography, …), read from the article's wikitext. Links and markup are converted to their visible text; a sentence containing any other template is skipped rather than patched. Credited to its section. |
 | Image | First **public-domain or CC0** file in the article (infobox first). Artist, date and file page from Commons `extmetadata`. Other licences are skipped. |
 | Parent / consort / sibling | Infobox parameters (`parents`, `children`, `consort`, `siblings`, …) |
 | Appears in | An event's lead section links to the figure, or the figure's lead links to the event |
 | Linked with | Two articles whose lead sections link to each other |
 | Generation (timeline) | *Derived*: a least-squares fit of the parent (+1 generation), consort/sibling (same generation) and event links above. Myth has no calendar, so the axis is relative. Figures outside the main family network stay **unplaced**; nothing is guessed. |
+
+**English / Dutch.** The EN/NL toggle switches the interface language. Dutch *content* is Dutch
+Wikipedia's own article on the same subject, reached through the English article's interlanguage
+link and stored in `node_i18n`. Nothing is machine-translated. Where no Dutch article exists, the card
+says so and shows the English text. Only the interface strings in `public/js/i18n.js` are
+hand-translated.
 
 The curated seed list (`ingest/seeds.js`) holds only article titles and a curatorial group.
 One-hop expansion adds infobox family members, typed from Wikipedia's own short description.
@@ -49,7 +55,10 @@ npm run ingest -- --out graph.json   # also write the graph JSON
 npm run dev                # http://localhost:4173, reads /api/graph from Neon
 ```
 
-The ingester needs outbound HTTPS to `en.wikipedia.org`. Image files load in the browser
+The ingester needs outbound HTTPS to `en.wikipedia.org` and `nl.wikipedia.org`. Behind an HTTP
+proxy, run it with `NODE_USE_ENV_PROXY=1` so Node's `fetch` uses `HTTPS_PROXY`. Responses are cached in
+`ingest/.cache/` (gitignored), so an interrupted run resumes without re-fetching. Requests are paced
+and honour `Retry-After`. Image files load in the browser
 from `upload.wikimedia.org`. `ingest/last-report.json` lists seed titles that were missing or
 turned out to be disambiguation pages, the pages added by expansion, and pages without a
 public-domain image.

@@ -24,7 +24,16 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => m.type() === 'error' && !/Failed to load resource.*(upload\.wikimedia|favicon)/.test(m.text()) && errors.push(m.text()));
+// Resource failures are judged by URL (requestfailed), not by the console line,
+// which omits the URL. Wikimedia image hosts are reported, not failed: a sandbox
+// without their TLS chain cannot load them, a real browser can.
+page.on('console', (m) => m.type() === 'error' && !/^Failed to load resource/.test(m.text()) && errors.push(m.text()));
+const imageFailures = [];
+page.on('requestfailed', (r) => {
+  const url = r.url();
+  if (/^https:\/\/(upload|thumb)\.wikimedia\.org\//.test(url)) imageFailures.push(url);
+  else if (!/favicon/.test(url)) errors.push(`request failed: ${url} (${r.failure()?.errorText})`);
+});
 
 const t0 = Date.now();
 await page.goto(BASE, { waitUntil: 'networkidle' });
@@ -167,6 +176,36 @@ await sleep(1500);
 check('play advances the scrubber', Number(await page.inputValue('#scrub')) < tstats.maxGen);
 await page.click('#play');
 
+// Language toggle: interface strings switch; content is Dutch Wikipedia's own
+// text where the node has a Dutch article, otherwise the English text marked as such.
+await page.click('button[data-view="graph"]');
+const withNl = data.nodes.find((n) => n.i18n?.nl?.extract);
+const probe = withNl ?? data.nodes[0];
+await page.evaluate((id) => { location.hash = `#graph/${id}`; }, probe.id);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForFunction(() => window.__myth?.index);
+await sleep(2200);
+await page.click('.lang-toggle button[data-lang="nl"]');
+await sleep(500);
+const nlState = await page.evaluate(() => ({
+  lang: document.documentElement.lang,
+  tab: document.querySelector('[data-view="timeline"]').textContent,
+  extract: document.querySelector('#detail .extract p')?.textContent ?? '',
+  fallback: !!document.querySelector('#detail .fallback'),
+  src: document.querySelector('#detail .src')?.textContent ?? '',
+}));
+check('NL toggle translates the interface', nlState.lang === 'nl' && nlState.tab === 'Tijdlijn', nlState.tab);
+if (withNl) {
+  const firstNl = withNl.i18n.nl.extract.split(/\n+/)[0].slice(0, 40);
+  check('NL shows Dutch Wikipedia text', !nlState.fallback && /Nederlandstalige Wikipedia/.test(nlState.src) && nlState.extract.includes(firstNl.slice(0, 20)), withNl.i18n.nl.title);
+} else {
+  check('NL without Dutch article is marked as English fallback', nlState.fallback);
+}
+await shot(page, '11-dutch');
+await page.click('.lang-toggle button[data-lang="en"]');
+await sleep(300);
+check('EN toggle restores English', await page.evaluate(() => document.documentElement.lang === 'en' && document.querySelector('[data-view="timeline"]').textContent === 'Timeline'));
+
 // Dark mode + mobile
 await page.click('#theme-toggle');
 await page.click('button[data-view="graph"]');
@@ -180,6 +219,7 @@ check('no horizontal overflow at phone width', !overflow);
 await shot(page, '10-mobile');
 
 check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+if (imageFailures.length) console.log(`note: ${imageFailures.length} Wikimedia image loads failed in this browser (TLS/network), not counted as app errors`);
 await browser.close();
 writeFileSync(new URL('./last-run.json', import.meta.url), JSON.stringify({ base: BASE, at: new Date().toISOString(), results }, null, 2));
 const failed = results.filter((r) => !r.ok).length;

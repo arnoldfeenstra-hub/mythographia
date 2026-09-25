@@ -38,7 +38,8 @@ test('familyFromInfobox maps params to directed relations', () => {
   const pick = (t) => fam.filter((f) => f.target === t).map((f) => `${f.rel}:${f.dir}`);
   assert.deepEqual(pick('Beta (test)'), ['parent:in']);
   assert.deepEqual(pick('Gamma'), ['parent:in']);
-  assert.deepEqual(pick('Epsilon'), ['sibling:out']);
+  assert.deepEqual(pick('Delta'), ['sibling:out']);
+  assert.deepEqual(pick('Epsilon'), [], 'anchored link is a section, not a person');
   assert.deepEqual(pick('Zeta'), ['consort:out']);
   assert.deepEqual(pick('Eta'), ['parent:out']);
   assert.equal(fam.some((f) => f.target === 'Ignored ref link'), false);
@@ -97,4 +98,54 @@ test('titles normalise and slug', () => {
   assert.equal(normalizeTitle('#anchor'), null);
   assert.equal(slugify('Pasiphaë'), 'pasiphae');
   assert.equal(slugify('Chaos (cosmogony)'), 'chaos-cosmogony');
+});
+
+import { funFactFromWikitext, wikitextToPlain } from '../ingest/parse.js';
+
+test('fun fact from wikitext keeps text verbatim and skips template gaps', () => {
+  const wt = `Lead.\n== Etymology ==\n{{Main|Something}}\nThe name ''Alpha'' ({{lang|grc|Ἄλφα}}) comes from a placeholder root meaning "first thing" in an old tongue.<ref>{{cite book|title=X}}</ref> Another sentence follows it here.\n\n== Myths ==\nText.`;
+  const f = funFactFromWikitext(wt);
+  assert.equal(f.section, 'Etymology');
+  assert.equal(f.text, 'The name Alpha (Ἄλφα) comes from a placeholder root meaning "first thing" in an old tongue.');
+});
+
+test('fun fact skips sentences where a template would leave a gap', () => {
+  const wt = `== Etymology ==\nThe word is pronounced {{IPA|/x/}} by some speakers of the placeholder tongue today.\n\n== Iconography ==\nIn placeholder art the figure is usually shown holding a [[Beta (object)|beta]] and wearing a long cloak.`;
+  const f = funFactFromWikitext(wt);
+  assert.equal(f.section, 'Iconography');
+  assert.equal(f.text, 'In placeholder art the figure is usually shown holding a beta and wearing a long cloak.');
+  assert.equal(funFactFromWikitext('== Myths ==\nNo named fact section here at all, just some long placeholder text.'), null);
+});
+
+test('wikitextToPlain converts links and drops refs and files', () => {
+  assert.equal(wikitextToPlain("[[File:x.jpg|thumb|cap]]\n'''Bold''' [[Target|shown]] and [[Plain]]<ref>r</ref>").trim(), 'Bold shown and Plain');
+});
+
+test('infobox family links to a section anchor are not people', () => {
+  const box = parseInfobox('{{Infobox deity\n| siblings = [[Gamma]], [[Delta#Offspring|many half-siblings]]\n}}');
+  assert.deepEqual(familyFromInfobox(box).map((f) => f.target), ['Gamma']);
+});
+
+test('expansion typing: set-index pages skipped, generic descriptions unclassified', () => {
+  assert.equal(typeFromDescription('Multiple Greek mythological figures'), null);
+  assert.equal(typeFromDescription('Set of mythological Greek characters'), null);
+  assert.equal(typeFromDescription('Greek mythological figure'), 'figure');
+  assert.equal(typeFromDescription('Son of a placeholder in Greek mythology'), 'figure');
+  assert.equal(typeFromDescription('Pre-Olympian gods in Greek mythology'), 'titan');
+  assert.equal(typeFromDescription('Theban princess in Greek mythology'), 'mortal');
+});
+
+test('Dutch fun facts use Dutch section names', () => {
+  const wt = `Inleiding.\n== Etymologie ==\nDe naam Alfa is afgeleid van een oud woord dat zoiets als "eerste ding" betekent in een oude taal.\n\n== Mythe ==\nTekst.`;
+  const f = funFactFromWikitext(wt, 300, 'nl');
+  assert.equal(f.section, 'Etymologie');
+  assert.ok(wt.includes(f.text));
+  assert.equal(funFactFromWikitext(wt, 300, 'en'), null, 'English section names do not match Dutch headings');
+});
+
+test('poets and historians are not myth figures', () => {
+  assert.equal(typeFromDescription('Ancient Greek poet'), null);
+  assert.equal(typeFromDescription('Ancient Greek epic poet'), null);
+  assert.equal(typeFromDescription('Greek historian'), null);
+  assert.equal(typeFromDescription('Nymph in Greek mythology'), 'deity');
 });

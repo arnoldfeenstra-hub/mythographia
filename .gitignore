@@ -5,3 +5,5 @@ qa/fixture-graph.json
 qa/last-run.json
 ingest/last-report.json
 .vercel
+qa/real-graph.json
+ingest/.cache/

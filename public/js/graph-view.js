@@ -486,7 +486,7 @@ export function createGraphView({ canvas, index, onHover, onSelect, onExpand }) 
     for (const c of cands.slice(0, 160)) {
       const big = c.must || c.pri > 40;
       const font = `${big ? 600 : 500} ${big ? 16 : 14}px "Cormorant Garamond", Georgia, serif`;
-      const w = measure(font, c.n.data.title);
+      const w = measure(font, (c.n.data.name ?? c.n.data.title));
       const r = c.n.r * k;
       const x = c.sx - w / 2;
       const y = c.sy + r + 10;
@@ -497,9 +497,9 @@ export function createGraphView({ canvas, index, onHover, onSelect, onExpand }) 
       ctx.globalAlpha = (c.n.em ?? 1) < 0.5 ? 0.35 : c.n.fade ?? 1;
       ctx.lineWidth = 4;
       ctx.strokeStyle = colors.paper;
-      ctx.strokeText(c.n.data.title, x, y);
+      ctx.strokeText((c.n.data.name ?? c.n.data.title), x, y);
       ctx.fillStyle = colors.ink;
-      ctx.fillText(c.n.data.title, x, y);
+      ctx.fillText((c.n.data.name ?? c.n.data.title), x, y);
     }
     ctx.globalAlpha = 1;
   }
@@ -564,6 +564,7 @@ export function createGraphView({ canvas, index, onHover, onSelect, onExpand }) 
     isSettled: () => sim.alpha() < 0.05,
     onStage: (id) => !!simNodes.get(id)?.onStage,
     refreshTheme() { colors = readColors(); dirty = true; },
+    refreshLabels() { textWidth.clear(); dirty = true; },
     stats() {
       const sorted = [...lastFrameTimes].sort((a, b) => a - b);
       return { dpr, nodes: nodes.length, links: links.length, frameMsP50: sorted[Math.floor(sorted.length / 2)] ?? null, frameMsP95: sorted[Math.floor(sorted.length * 0.95)] ?? null, k: transform.k };

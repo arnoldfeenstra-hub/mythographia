@@ -9,6 +9,7 @@ export const FAMILIES = {
   mortal: { label: 'Mortals', order: 1 },
   monster: { label: 'Monsters', order: 2 },
   event: { label: 'Events', order: 3 },
+  other: { label: 'Unclassified', order: 4 },
 };
 
 export const NODE_TYPES = {
@@ -20,9 +21,12 @@ export const NODE_TYPES = {
   mortal: { label: 'Mortal', family: 'mortal', order: 5 },
   creature: { label: 'Creature', family: 'monster', order: 6 },
   event: { label: 'Event', family: 'event', order: 7 },
+  // Reached by expansion, but Wikipedia's short description does not say what
+  // kind of figure it is. Drawn in neutral grey rather than given a guessed hue.
+  figure: { label: 'Figure', family: 'other', order: 8 },
 };
 
-export const familyOf = (node) => NODE_TYPES[node.type]?.family ?? 'mortal';
+export const familyOf = (node) => NODE_TYPES[node.type]?.family ?? 'other';
 
 // rel: how the edge reads from s to t.
 export const RELATIONS = {

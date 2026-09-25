@@ -21,13 +21,16 @@ export function stripRefs(wikitext) {
 }
 
 // [[Target]] / [[Target|label]] in article namespace only.
-export function extractLinks(wikitext) {
+// dropAnchored: skip [[Page#Section|…]] links. In an infobox those point at a
+// section (e.g. a list of someone's offspring), not at the person named.
+export function extractLinks(wikitext, { dropAnchored = false } = {}) {
   const out = [];
   const re = /\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]/g;
   let m;
   while ((m = re.exec(wikitext))) {
     const target = m[1];
     if (/^\s*:?\s*(file|image|category|wikt|wiktionary|s|q|commons|media|help|wikipedia|wp|template|special|portal|draft|user)\s*:/i.test(target)) continue;
+    if (dropAnchored && target.includes('#')) continue;
     const t = normalizeTitle(target);
     if (t) out.push(t);
   }
@@ -125,7 +128,7 @@ export function familyFromInfobox(infobox) {
   for (const [key, value] of Object.entries(infobox.params)) {
     const spec = FAMILY_KEYS[key];
     if (!spec) continue;
-    for (const target of extractLinks(value)) out.push({ target, rel: spec.rel, dir: spec.dir, param: key });
+    for (const target of extractLinks(value, { dropAnchored: true })) out.push({ target, rel: spec.rel, dir: spec.dir, param: key });
   }
   return out;
 }
@@ -286,13 +289,126 @@ export function slugify(title) {
 export function typeFromDescription(desc) {
   if (!desc) return null;
   const d = desc.toLowerCase();
-  if (!/greek|mytholog|homeric|trojan|theban|argonaut/.test(d)) return null;
+  // Must be a figure *in* the myths. "Ancient Greek poet" (Hesiod, Homer) is a
+  // source about the myths, not a node in them.
+  if (!/mytholog|mythic|legendary|homeric|trojan|theban|argonaut|\bgods?\b|goddess|deity|nymph|titan|hero(ine)?\b|monster/.test(d)) return null;
+  // Set-index pages ("several figures named X") are a name, not a figure.
+  if (/several|multiple|various|set of|list of|name of|names of|figures in|characters/.test(d)) return null;
   if (/primordial/.test(d)) return 'primordial';
-  if (/\btitan(ess)?\b/.test(d)) return 'titan';
+  if (/\btitan(ess)?s?\b|pre-olympian/.test(d)) return 'titan';
   if (/olympian/.test(d)) return 'olympian';
-  if (/monster|creature|serpent|dragon|beast|giant\b|drakon|hound|bull\b|boar\b|lion\b/.test(d)) return 'creature';
-  if (/\bgod(dess)?\b|deity|nymph|personification|daimon|spirit/.test(d)) return 'deity';
+  if (/monster|creature|serpent|dragon|beast|\bgiants?\b|drakon|hound|\bbull\b|\bboar\b|\blion\b|cyclops|centaur/.test(d)) return 'creature';
+  if (/\bgods?\b|goddess|deity|deities|nymph|personification|daimon|spirit/.test(d)) return 'deity';
   if (/\bhero(ine)?\b|warrior|argonaut/.test(d)) return 'hero';
-  if (/king|queen|prince(ss)?|mortal|priest(ess)?|seer|princess|daughter|son\b|wife|figure|character/.test(d)) return 'mortal';
+  if (/\bking\b|\bqueen\b|prince(ss)?|\bmortal\b|priest(ess)?|\bseer\b|prophet/.test(d)) return 'mortal';
+  // The description names a figure but not what kind: say so, don't guess.
+  return 'figure';
+}
+
+// ---- fun facts from wikitext --------------------------------------------------
+// Same rule as pickFunFact (verbatim opening of a named section), but read from
+// the wikitext we already hold, so no per-page request is needed. Only markup
+// is converted: links become their visible text, inline-text templates such as
+// {{lang|grc|…}} become their text. Any other template would leave a gap, so a
+// sentence that contained one is never used.
+
+const GAP = '\u0000';
+const TEXT_TEMPLATES = /^(lang|lang-[a-z-]+|transl|transliteration|grc-transl|nowrap|smallcaps|small|em|lang-rtl|script|linktext|nobr|nbsp)$/i;
+
+function replaceTemplates(text) {
+  let out = text;
+  for (let guard = 0; guard < 20 && out.includes('{{'); guard++) {
+    // innermost templates first
+    out = out.replace(/\{\{([^{}]*)\}\}/g, (_, inner) => {
+      const parts = inner.split('|');
+      const name = parts[0].trim();
+      if (/^nbsp$/i.test(name)) return ' ';
+      if (TEXT_TEMPLATES.test(name)) {
+        const positional = parts.slice(1).filter((p) => !/^\s*[a-z_0-9-]+\s*=/i.test(p));
+        const last = positional.at(-1);
+        return last != null ? last.trim() : GAP;
+      }
+      return GAP;
+    });
+  }
+  return out;
+}
+
+export function wikitextToPlain(text) {
+  let t = stripRefs(text);
+  t = t.replace(/\{\|[\s\S]*?\|\}/g, '\n'); // tables
+  t = t.split('\n').filter((l) => !/^\s*\[\[\s*(file|image)\s*:/i.test(l)).join('\n');
+  t = t.replace(/<gallery[\s\S]*?<\/gallery>/gi, '');
+  t = replaceTemplates(t);
+  // a line that was only templates (hatnotes, infobox remnants) is not prose
+  t = t.split('\n').filter((l) => l.replace(new RegExp(GAP, 'g'), '').trim() !== '' || !l.includes(GAP)).join('\n');
+  t = t.replace(/\[\[(?:[^\[\]|]*\|)?([^\[\]]*)\]\]/g, '$1');
+  t = t.replace(/\[https?:[^\s\]]+\s([^\]]*)\]/g, '$1');
+  t = t.replace(/'{2,}/g, '');
+  t = t.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&ndash;/g, '–').replace(/&mdash;/g, '—');
+  return t;
+}
+
+function balanced(s) {
+  let p = 0;
+  for (const c of s) {
+    if (c === '(') p++;
+    else if (c === ')') p--;
+    if (p < 0) return false;
+  }
+  return p === 0 && (s.match(/"/g) || []).length % 2 === 0;
+}
+
+function sectionBodies(wikitext) {
+  const out = [];
+  const re = /^(={2,4})\s*(.+?)\s*\1\s*$/gm;
+  const heads = [];
+  let m;
+  while ((m = re.exec(wikitext))) heads.push({ heading: m[2].replace(/'{2,}/g, '').trim(), start: m.index + m[0].length, at: m.index });
+  heads.forEach((h, i) => out.push({ heading: h.heading, body: wikitext.slice(h.start, heads[i + 1]?.at ?? wikitext.length) }));
+  return out;
+}
+
+// Dutch Wikipedia's section names for the same kinds of section.
+const FACT_SECTIONS_NL = [
+  /^etymologie/i,
+  /^naam( en etymologie)?$/i,
+  /^namen$/i,
+  /^(epitheta|bijnamen|epitheton)/i,
+  /^symbo/i,
+  /^attributen/i,
+  /^iconografie/i,
+  /^(cultus|verering|eredienst)/i,
+  /^(nalatenschap|nawerking|receptie)/i,
+  /^in de (kunst|beeldende kunst|populaire cultuur|cultuur)/i,
+];
+const OPENING_PRONOUN = {
+  en: /^(it|its|this|these|those|he|she|they|his|her|their|him|them)\b/i,
+  nl: /^(dit|deze|hij|zij|ze|hun|zijn|haar|hem)\b/i,
+};
+
+export function funFactFromWikitext(wikitext, maxLen = 300, lang = 'en') {
+  if (!wikitext) return null;
+  const secs = sectionBodies(wikitext);
+  for (const pattern of lang === 'nl' ? FACT_SECTIONS_NL : FACT_SECTIONS) {
+    for (const s of secs.filter((x) => pattern.test(x.heading))) {
+      const plain = wikitextToPlain(s.body);
+      const paras = plain.split(/\n\s*\n|\n(?=[*#:;|])/).map((p) => p.replace(/\s+/g, ' ').trim())
+        .filter((p) => p.length > 60 && !/^[*#:;|!{]/.test(p));
+      for (const para of paras.slice(0, 1)) {
+        if (OPENING_PRONOUN[lang].test(para)) continue;
+        const sentences = para.match(/[^.!?]+(?:[.!?]+["”’)]*(?=\s|$)|$)/g) || [];
+        let out = '';
+        for (const sentence of sentences) {
+          if (sentence.includes(GAP) || /\{\{|\}\}|\[\[|\]\]|\|/.test(sentence)) break;
+          if ((out + sentence).length > maxLen) break;
+          out += sentence;
+          if (out.trim().length > 60 && balanced(out)) break;
+        }
+        out = out.trim();
+        if (out.length > 60 && balanced(out) && /[.!?]["”’)]*$/.test(out)) return { text: out, section: s.heading };
+      }
+    }
+  }
   return null;
 }

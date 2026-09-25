@@ -8,10 +8,10 @@
 
 import { writeFileSync } from 'node:fs';
 import pg from 'pg';
-import { api, queryTitles, pMap } from './wiki.js';
+import { queryTitles } from './wiki.js';
 import {
   parseInfobox, familyFromInfobox, leadSection, stripRefs, extractLinks, imageCandidates,
-  imageRecord, pickFunFact, slugify, typeFromDescription, normalizeTitle,
+  imageRecord, funFactFromWikitext, slugify, typeFromDescription, normalizeTitle,
 } from './parse.js';
 import { SEEDS } from './seeds.js';
 import { computeChronology } from '../public/js/model.js';
@@ -96,13 +96,10 @@ for (const p of ex.pages.values()) {
   n.pageimage = p.pageimage ? `File:${normalizeTitle(p.pageimage)}` : null;
 }
 
-// 5. Fun facts: verbatim opening of a named section --------------------------
-log('Fetching full plaintext for fun facts…');
-await pMap(titles, async (title) => {
-  const json = await api({ action: 'query', prop: 'extracts', explaintext: '1', exsectionformat: 'wiki', titles: title });
-  const text = json.query?.pages?.[0]?.extract;
-  nodes.get(title).funFact = pickFunFact(text);
-});
+// 5. Fun facts: verbatim opening of a named section, read from the wikitext
+//    already fetched (no extra requests; see funFactFromWikitext).
+for (const n of nodes.values()) n.funFact = funFactFromWikitext(n.wikitext || '');
+log(`  fun facts for ${[...nodes.values()].filter((n) => n.funFact).length}/${nodes.size} pages`);
 
 // 6. Redirect aliases so links resolve to canonical titles -------------------
 log('Resolving redirect aliases…');
@@ -180,6 +177,35 @@ for (const n of nodes.values()) {
 }
 log(`  ${titles.length - report.noImage.length}/${titles.length} nodes have a public-domain image`);
 
+// 8b. Dutch: the same article on nl.wikipedia, reached through the English
+//     article's interlanguage link. Dutch text is Dutch Wikipedia's own text;
+//     where no Dutch article exists the node simply has none (never translated).
+log('Following language links to Dutch Wikipedia…');
+const ll = await queryTitles(titles, { prop: 'langlinks', lllang: 'nl', lllimit: 'max' });
+const nlOf = new Map();
+for (const p of ll.pages.values()) {
+  const link = p.langlinks?.find((l) => l.lang === 'nl');
+  if (link && nodes.has(p.title)) nlOf.set(p.title, link.title);
+}
+const nlTitles = [...new Set(nlOf.values())];
+const nlEx = await queryTitles(nlTitles, { prop: 'extracts|description', exintro: '1', explaintext: '1', exlimit: '20' }, 20, 'nl');
+const nlWt = await queryTitles(nlTitles, { prop: 'revisions', rvprop: 'content|ids', rvslots: 'main' }, 10, 'nl');
+for (const [enTitle, nlTitle] of nlOf) {
+  const p = nlEx.pages.get(nlEx.resolved.get(nlTitle) ?? nlTitle);
+  if (!p || p.missing) continue;
+  const rev = nlWt.pages.get(nlWt.resolved.get(nlTitle) ?? nlTitle)?.revisions?.[0];
+  nodes.get(enTitle).nl = {
+    title: p.title,
+    description: p.description ?? null,
+    extract: p.extract?.trim() || null,
+    funFact: funFactFromWikitext(rev?.slots?.main?.content ?? '', 300, 'nl'),
+    revision_id: rev?.revid ?? null,
+    wiki_url: `https://nl.wikipedia.org/wiki/${encodeURIComponent(p.title.replace(/ /g, '_'))}`,
+  };
+}
+report.nlMissing = titles.filter((t) => !nodes.get(t).nl);
+log(`  ${titles.length - report.nlMissing.length}/${titles.length} have a Dutch article`);
+
 // 9. Relative chronology ----------------------------------------------------
 const idOf = new Map(titles.map((t) => [t, slugify(t)]));
 const edges = [...edgeMap.values()].map((e) => ({ ...e, s: idOf.get(e.s), t: idOf.get(e.t) }));
@@ -194,7 +220,7 @@ const graph = {
       extract: n.extract, fun_fact: n.funFact?.text ?? null, fun_fact_section: n.funFact?.section ?? null,
       generation: generation.get(idOf.get(t)),
       wiki_url: `https://en.wikipedia.org/wiki/${encodeURIComponent(t.replace(/ /g, '_'))}`,
-      revision_id: n.revision_id ?? null, image: n.image,
+      revision_id: n.revision_id ?? null, image: n.image, nl: n.nl ?? null,
     };
   }),
   edges,
@@ -202,10 +228,18 @@ const graph = {
 const dupIds = titles.length - new Set(idOf.values()).size;
 if (dupIds) throw new Error(`${dupIds} slug collisions`);
 
+function i18nRows(list) {
+  return list.filter((n) => n.nl).map((n) => ({
+    node_id: n.id, lang: 'nl', title: n.nl.title, description: n.nl.description, extract: n.nl.extract,
+    fun_fact: n.nl.funFact?.text ?? null, fun_fact_section: n.nl.funFact?.section ?? null,
+    wiki_url: n.nl.wiki_url, revision_id: n.nl.revision_id,
+  }));
+}
+
 if (outPath) {
   const rows = graph.nodes.map((n) => ({ ...n, ...(n.image || {}) }));
   const edgeRows = graph.edges.map((e) => ({ source: e.s, target: e.t, rel: e.rel, provenance: e.provenance }));
-  writeFileSync(outPath, JSON.stringify(toApiGraph(rows, edgeRows, new Date().toISOString())));
+  writeFileSync(outPath, JSON.stringify(toApiGraph(rows, edgeRows, new Date().toISOString(), i18nRows(graph.nodes))));
   log(`Wrote ${outPath}`);
 }
 
@@ -218,6 +252,7 @@ if (writeDb) {
     await client.query('begin');
     const run = await client.query('insert into ingest_runs (seed_count) values ($1) returning id', [SEEDS.length]);
     const runId = run.rows[0].id;
+    await client.query('delete from node_i18n');
     await client.query('delete from edges');
     await client.query('delete from images');
     await client.query('delete from nodes');
@@ -239,6 +274,13 @@ if (writeDb) {
             i.artist, i.date_text, i.license, i.credit, i.object_name],
         );
       }
+    }
+    for (const r of i18nRows(graph.nodes)) {
+      await client.query(
+        `insert into node_i18n (node_id, lang, title, description, extract, fun_fact, fun_fact_section, wiki_url, revision_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [r.node_id, r.lang, r.title, r.description, r.extract, r.fun_fact, r.fun_fact_section, r.wiki_url, r.revision_id],
+      );
     }
     for (const e of graph.edges) {
       await client.query('insert into edges (source, target, rel, provenance) values ($1,$2,$3,$4)', [e.s, e.t, e.rel, e.provenance]);

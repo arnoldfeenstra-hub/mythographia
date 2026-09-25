@@ -12,19 +12,23 @@
   <header class="masthead">
     <div class="brand">
       <h1>Mythographia</h1>
-      <p class="dek">An atlas of Greek myth, drawn from Wikipedia</p>
+      <p class="dek" data-i18n="dek">An atlas of Greek myth, drawn from Wikipedia</p>
     </div>
     <nav class="views" role="tablist" aria-label="View">
-      <button role="tab" data-view="graph" aria-selected="true">Web</button>
-      <button role="tab" data-view="timeline" aria-selected="false">Timeline</button>
-      <button role="tab" data-view="path" aria-selected="false">Six degrees</button>
+      <button role="tab" data-view="graph" aria-selected="true" data-i18n="view.graph">Web</button>
+      <button role="tab" data-view="timeline" aria-selected="false" data-i18n="view.timeline">Timeline</button>
+      <button role="tab" data-view="path" aria-selected="false" data-i18n="view.path">Six degrees</button>
     </nav>
     <div class="search" role="search">
-      <input id="search" type="search" placeholder="Find a god, hero, monster…" autocomplete="off" spellcheck="false" aria-label="Search" aria-controls="search-results" />
+      <input id="search" type="search" placeholder="Find a god, hero, monster…" autocomplete="off" spellcheck="false" aria-label="Search" aria-controls="search-results" data-i18n-attr="placeholder:search.placeholder,aria-label:search.label" />
       <kbd>/</kbd>
       <ol id="search-results" class="results" role="listbox" hidden></ol>
     </div>
-    <button id="theme-toggle" class="icon-btn" aria-label="Toggle dark mode" title="Toggle dark mode">
+    <div class="lang-toggle" role="group" data-i18n-attr="aria-label:lang.toggle" aria-label="Language">
+      <button data-lang="en" aria-pressed="true" lang="en" title="English">EN</button>
+      <button data-lang="nl" aria-pressed="false" lang="nl" title="Nederlands">NL</button>
+    </div>
+    <button id="theme-toggle" class="icon-btn" aria-label="Toggle dark mode" title="Toggle dark mode" data-i18n-attr="aria-label:theme.toggle,title:theme.toggle">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
     </button>
   </header>
@@ -33,32 +37,32 @@
     <section id="graph-view" class="view" aria-label="Relationship web">
       <canvas id="graph-canvas"></canvas>
       <div class="graph-controls">
-        <button id="show-all" class="chip">Show all</button>
-        <button id="reset-view" class="chip">Recentre</button>
+        <button id="show-all" class="chip" data-i18n="showAll">Show all</button>
+        <button id="reset-view" class="chip" data-i18n="recentre">Recentre</button>
       </div>
     </section>
 
     <section id="timeline-view" class="view" aria-label="Mythic timeline" hidden>
       <svg id="timeline-svg"></svg>
       <div class="scrubber">
-        <button id="play" class="icon-btn" aria-label="Play timeline">
+        <button id="play" class="icon-btn" aria-label="Play timeline" data-i18n-attr="aria-label:tl.play">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 5l12 7-12 7z" fill="currentColor"/></svg>
         </button>
-        <input id="scrub" type="range" min="0" max="100" step="0.1" value="100" aria-label="Scrub through mythic generations" />
+        <input id="scrub" type="range" min="0" max="100" step="0.1" value="100" aria-label="Scrub through mythic generations" data-i18n-attr="aria-label:tl.scrub" />
         <output id="scrub-label" for="scrub"></output>
       </div>
     </section>
 
     <aside id="path-panel" class="path-panel" hidden aria-label="Six degrees">
-      <h2>Six degrees of Greek myth</h2>
-      <p class="hint">Pick any two figures. The shortest chain of family ties and shared stories between them is traced across the web.</p>
-      <label>From <input id="path-from" type="search" autocomplete="off" placeholder="e.g. a god" /></label>
-      <label>To <input id="path-to" type="search" autocomplete="off" placeholder="e.g. a monster" /></label>
+      <h2 data-i18n="path.title">Six degrees of Greek myth</h2>
+      <p class="hint" data-i18n="path.hint">Pick any two figures. The shortest chain of family ties and shared stories between them is traced across the web.</p>
+      <label><span data-i18n="path.from">From</span> <input id="path-from" type="search" autocomplete="off" placeholder="e.g. a god" data-i18n-attr="placeholder:path.fromPh" /></label>
+      <label><span data-i18n="path.to">To</span> <input id="path-to" type="search" autocomplete="off" placeholder="e.g. a monster" data-i18n-attr="placeholder:path.toPh" /></label>
       <ol id="path-suggest" class="results" role="listbox" hidden></ol>
-      <label class="check"><input id="family-only" type="checkbox" /> Blood and marriage ties only</label>
+      <label class="check"><input id="family-only" type="checkbox" /> <span data-i18n="path.familyOnly">Blood and marriage ties only</span></label>
       <div class="row">
-        <button id="path-go" class="primary">Trace the thread</button>
-        <button id="path-random" class="chip">Surprise me</button>
+        <button id="path-go" class="primary" data-i18n="path.go">Trace the thread</button>
+        <button id="path-random" class="chip" data-i18n="path.random">Surprise me</button>
       </div>
       <ol id="path-result" class="chain"></ol>
     </aside>
@@ -68,14 +72,14 @@
     <article id="detail" class="detail" hidden aria-live="polite"></article>
     <div id="hovercard" class="hovercard" hidden></div>
 
-    <div id="status" class="status">Gathering the myths…</div>
+    <div id="status" class="status" data-i18n="status.loading">Gathering the myths…</div>
   </main>
 
   <footer class="colophon">
-    <p class="short">Text: <a href="https://en.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> contributors,
+    <p class="short" id="foot-short">Text: <a href="https://en.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a> contributors,
       <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a> ·
       Images: <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>, public domain · nothing AI-generated</p>
-    <p class="long">
+    <p class="long" id="foot-long">
       <strong>Sources.</strong> All text is from <a href="https://en.wikipedia.org/" target="_blank" rel="noopener">English Wikipedia</a>
       by its contributors, used under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a> —
       attribution and share-alike required; every entry links to its article and the exact revision used, and text is excerpted, not altered.

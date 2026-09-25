@@ -91,7 +91,8 @@ await page.locator(`#search-results li[data-id="${firstHit}"]`).click();
 await sleep(1500);
 const st = await page.evaluate(() => window.__myth.state());
 check('search selects the chosen node', st.selected === firstHit, firstHit);
-check('detail panel opens with title', await page.locator('#detail h2').textContent() === data.nodes.find((n) => n.id === firstHit).title);
+const shownName = await page.evaluate((id) => window.__myth.index.byId.get(id).name, firstHit);
+check('detail panel opens with title', await page.locator('#detail h2').textContent() === shownName, shownName);
 const onScreen = await page.evaluate((id) => {
   const p = window.__myth.graph.screenPos(id);
   const c = document.querySelector('#graph-canvas').getBoundingClientRect();
